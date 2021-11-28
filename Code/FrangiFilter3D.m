@@ -1,4 +1,4 @@
-function [Iout,Scale]=FrangiFilter3D_ori(I,options)
+function [Iout,Scale]=FrangiFilter3D_ori(I,options,Mask)
 %
 % This function FRANGIFILTER3D uses the eigenvectors of the Hessian to
 % compute the likeliness of a cryo-EM map region to tube-like structures.
@@ -16,11 +16,17 @@ function [Iout,Scale]=FrangiFilter3D_ori(I,options)
 %					   default .45;
 %       .FrangiBeta  : Frangi vesselness constant, which determines the deviation
 %					   from a blob like structure, default .45;
-%       .FrangiC     : Frangi vesselness constant which gives
-%					   the threshold between eigenvalues of noise and 
-%					   vessel structure. A thumb rule is dividing the 
-%					   the greyvalues of the vessels by 4 till 6, default 0.1;
+%       .FrangiC     : If a solvent Mask is not provided (third input optional parameter): 
+%					   Frangi vesselness constant that gives the threshold between 
+%					   eigenvalues of noise and vessel structure. A thumb rule is dividing the 
+%					   the greyvalues of the vessels by 4 till 6, default
+%					   0.1. If a solvent masl is provided: quantile of the
+%					   empiral distrubution of R_{kappa} calculated using
+%					   volxels outsie de mask only. A Good value is
+%					   0.9
 %       .verbose : Show debug information, default true
+%   Mask: Optional parameter which corresponds to a binary solvent mask
+%   where 1 means protein and 0 background.
 %
 % Outputs,
 %   J : The tubular enhanced image (pixel is the maximum found in all scales)
@@ -118,7 +124,7 @@ for i = 1:length(sigmas),
 
     if(sigmas(i)>0)
         % Correct for scaling
-        c=(sigmas(i)^2);
+        c=(sigmas(i)^0.5);
         Dxx = c*Dxx; Dxy = c*Dxy;
         Dxz = c*Dxz; Dyy = c*Dyy;
         Dyz = c*Dyz; Dzz = c*Dzz;
@@ -140,15 +146,22 @@ for i = 1:length(sigmas),
 
     % Second order structureness. S = sqrt(sum(L^2[i])) met i =< D
     S = sqrt(LambdaAbs1.^2+LambdaAbs2.^2+LambdaAbs3.^2);
-    A = 2*options.FrangiAlpha^2; B = 2*options.FrangiBeta^2;  C = 2*options.FrangiC^2;
-	
+    A = 2*options.FrangiAlpha^2; B = 2*options.FrangiBeta^2;
+	    
+    if(nargin>2)
+        q = quantile(S(~(Mask>0)),options.FrangiC);
+        C = 2*(q)^2;
+    else        
+        C = 2*options.FrangiC^2;
+    end
+    
     % Free memory
     clear LambdaAbs1 LambdaAbs2 LambdaAbs3
 
     %Compute Vesselness function
     expRa = (1-exp(-(Ra.^2./A)));
     expRb =    exp(-(Rb.^2./B));
-    expS  = (1-exp(-S.^2./(2*options.FrangiC^2)));
+    expS  = (1-exp(-S.^2./C));
     %keyboard
     % Free memory
     clear S A B C Ra Rb
@@ -168,14 +181,14 @@ for i = 1:length(sigmas),
     if(i==1)
         Iout=Voxel_data;
         if(nargout>1)
-            Scale = ones(size(I),class(Iout));
+            Scale = 2*max(sigmas)*ones(size(I),class(Iout));
         end
 
     else
         if(nargout>1)
-            Scale(Voxel_data>Iout)=i;
-        end
-        % Keep maximum filter response
+            Scale(Voxel_data>Iout)=2*sigmas(i);            
+        end        % Keep maximum filter response
+
         Iout=max(Iout,Voxel_data);
     end
 end
